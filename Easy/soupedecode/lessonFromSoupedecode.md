@@ -14,8 +14,9 @@
 *   **User Enumeration:** Leveraging the guest access, Metasploit's `lookupsid` module (RID Cycling) was used to dump a list of **1,069 domain users**.
 
 #### 2. Initial Access
-*   **Password Spraying:** Armed with the user list, performed a specific spray attack testing for "Username as Password" (`user:user`).
-*   **Success:** The user `ybob317` was found using the password `ybob317`.
+*   **Password Spraying:** Armed with the user list, performed a specific spray attack testing for "Username as Password" (`user:us
+* er`).
+*   **Success:** A user was found using a password identical to their username.
 *   **Flag Retrieval:** Accessing the `Users` share with these credentials provided the `user.txt` flag.
 
 #### 3. Lateral Movement & Privilege Escalation
@@ -38,7 +39,7 @@ This box demonstrates several critical misconfigurations common in Active Direct
 *   **Fix:** Disable the Guest account and restrict anonymous enumeration of SAM accounts and shares.
 
 #### 2. Weak Password Policies
-*   **The Flaw:** The user `ybob317` had a password identical to their username.
+*   **The Flaw:** A user had a password identical to their username.
 *   **The Impact:** This is the "low-hanging fruit" for attackers. Even without complex brute-forcing, a simple check of `user:user` or `user:password` often grants entry.
 *   **Fix:** Enforce strong password complexity policies and prevent passwords that contain the username.
 

