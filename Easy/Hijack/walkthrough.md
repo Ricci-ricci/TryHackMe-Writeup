@@ -1,7 +1,7 @@
 # Hijack - TryHackMe Walkthrough
 
 **Room:** Hijack  
-**Difficulty:** Medium (Labeled Easy in folder, but notes say Medium)  
+**Difficulty:** Easy
 **Goal:** Get root access on the box.
 
 Let's go!
@@ -11,7 +11,7 @@ Let's go!
 First, as always, we perform an Nmap scan to enumerate open ports and services.
 
 ```bash
-nmap -p- -sC -sV -T4 --min-rate=1000 10.65.147.25
+nmap -p- -sC -sV -T4 --min-rate=1000 <IP_ADDRESS>
 ```
 
 **Results:**
@@ -37,12 +37,12 @@ Checking `robots.txt` and other standard files is good practice, but the NFS ser
 Port 2049 indicates an NFS share. We can list available shares using `showmount`.
 
 ```bash
-showmount -e 10.65.147.25
+showmount -e <IP_ADDRESS>
 ```
 
 **Output:**
 ```text
-Export list for 10.65.147.25:
+Export list for <IP_ADDRESS>:
 /mnt/share *
 ```
 
@@ -51,8 +51,8 @@ We see `/mnt/share` is available. Let's mount it to our local machine.
 ```bash
 mkdir local_mount
 sudo mount -t nfs 10.65.147.25:/mnt/share local_mount/
-cd local_mount
-ls -la
+cd local_mount  //failed
+ls -la //failed due to users not matching
 ```
 
 **Findings:**
@@ -72,7 +72,7 @@ Now accessing the mount as `hijack_user`, we can read the files. We find FTP cre
 Using the credentials found in the NFS share, we log in to FTP.
 
 ```bash
-ftp 10.65.147.25
+ftp <IP_ADDRESS>
 ```
 
 Inside FTP, we find two interesting files:
@@ -128,7 +128,7 @@ $password = "......"; // (Redacted)
 We can use these credentials to SSH into the box as `rick`.
 
 ```bash
-ssh rick@10.65.147.25
+ssh rick@<IP_ADDRESS>
 ```
 
 **Flag:** We can now read `user.txt`.

@@ -1,6 +1,6 @@
 # Hijack - Mission Briefing & Analysis
 
-**Target:** `10.65.147.25` (Linux Box)
+**Target:** `Hijack` (Linux Box)
 **Objective:** Compromise the web server, pivot to a user, and escalate privileges to root.
 **Key Techniques:** NFS Enumeration, ID Spoofing, Session Hijacking (Cookie Forging), Command Injection, Library Hijacking (`LD_LIBRARY_PATH`).
 
