@@ -65,7 +65,8 @@ Because the key is passphrase-protected, convert it into a format John can crack
 
 ```/dev/null/ssh2john.txt#L1-2
 ssh2john id_rsa > id_rsa.hash
-john --wordlist=/usr/share/wordlists/rockyou.txt id_rsa.hash
+john id_rsa.hash
+and we get the passphrase:
 ```
 
 Once John recovers the passphrase, you can use the key for SSH.
