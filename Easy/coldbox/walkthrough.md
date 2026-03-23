@@ -86,6 +86,8 @@ Use a PHP reverse shell payload (example: PentestMonkey variant) configured to y
 Trigger the edited template by visiting a missing page (to hit 404), for example:
 
 - `http://<IP_ADDRESS>/this_should_404`
+- or
+- `http://<IP_ADDRESS>/themes/twentyfifteen/404.php`
 
 If you edited the right theme file, you should receive a shell as:
 
